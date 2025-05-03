@@ -1,0 +1,11 @@
+tensorflow==2.15.0
+pandas 
+numpy 
+scikit-learn
+tensorboard
+matplotlib
+scikeras
+jupyter
+urllib3==1.26.20
+fastapi
+uvicorn
