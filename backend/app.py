@@ -1,16 +1,22 @@
 import numpy as np
 import tensorflow as tf
-from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
 import pandas as pd
 import pickle
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from enum import Enum
+import warnings
+from fastapi.middleware.cors import CORSMiddleware
+warnings.filterwarnings("ignore")
+
+
+
+
 
 # Load the trained model
 model = tf.keras.models.load_model('models/model.h5')
 
-# Load the encoders and scaler
+# Load encoders and scaler
 with open('models/label_encoder_gender.pkl', 'rb') as file:
     label_encoder_gender = pickle.load(file)
 
@@ -23,7 +29,15 @@ with open('models/scaler.pkl', 'rb') as file:
 # FastAPI app
 app = FastAPI()
 
-# Enum for Geography and Gender
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # or ["http://localhost:3000"] to be more secure
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Enums for consistent input
 class GeographyEnum(str, Enum):
     france = "France"
     germany = "Germany"
@@ -33,23 +47,23 @@ class GenderEnum(str, Enum):
     male = "Male"
     female = "Female"
 
-# Define input data model
+# Input schema
 class InputData(BaseModel):
+    credit_score: float
     geography: GeographyEnum
     gender: GenderEnum
     age: int
-    balance: float
-    credit_score: float
-    estimated_salary: float
     tenure: int
+    balance: float
     num_of_products: int
     has_cr_card: int
     is_active_member: int
+    estimated_salary: float
 
 @app.post("/predict-churn/")
 async def predict_churn(input_data: InputData):
-    # Prepare the input data as pandas DataFrame
-    data = pd.DataFrame({
+    # Convert input to DataFrame
+    input_dict = {
         'CreditScore': [input_data.credit_score],
         'Gender': [label_encoder_gender.transform([input_data.gender])[0]],
         'Age': [input_data.age],
@@ -59,33 +73,28 @@ async def predict_churn(input_data: InputData):
         'HasCrCard': [input_data.has_cr_card],
         'IsActiveMember': [input_data.is_active_member],
         'EstimatedSalary': [input_data.estimated_salary]
-    })
+    }
+    df = pd.DataFrame(input_dict)
 
-    # One-hot encode 'Geography'
+    # One-hot encode geography
     geo_encoded = onehot_encoder_geo.transform([[input_data.geography]]).toarray()
     geo_encoded_df = pd.DataFrame(geo_encoded, columns=onehot_encoder_geo.get_feature_names_out(['Geography']))
 
-    # Combine one-hot encoded columns with input data
-    input_data_processed = pd.concat([data.reset_index(drop=True), geo_encoded_df], axis=1)
+    # Merge features
+    full_input = pd.concat([df, geo_encoded_df], axis=1)
 
-    # Scale the input data
-    input_data_scaled = scaler.transform(input_data_processed)
+    # Scale features
+    scaled_input = scaler.transform(full_input)
 
     # Predict churn
-    prediction = model.predict(input_data_scaled)
+    prediction = model.predict(scaled_input)
     prediction_proba = prediction[0][0]
-
-    # Determine churn likelihood
-    if prediction_proba > 0.5:
-        churn_result = "The customer is likely to churn."
-    else:
-        churn_result = "The customer is not likely to churn."
+    churn_result = "The customer is likely to churn." if prediction_proba > 0.5 else "The customer is not likely to churn."
 
     return {
-        "churn_probability": round(prediction_proba, 2),
+        "churn_probability": round(float(prediction_proba), 2),
         "churn_result": churn_result
     }
 
-# To run the FastAPI app, you would use the following command:
-# uvicorn filename:app --reload
+# Run using: uvicorn your_filename:app --reload
 
